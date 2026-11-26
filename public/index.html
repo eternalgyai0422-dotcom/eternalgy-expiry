@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Eternalgy 到期提醒</title>
+<meta name="theme-color" content="#0f5132">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📅</text></svg>">
+<style>
+  :root{
+    --bg:#f4f6f5; --card:#fff; --ink:#1c2321; --muted:#68736f; --line:#e1e6e4;
+    --brand:#0f5132; --brand-soft:#e3f1ea;
+    --red:#c0392b; --red-soft:#fdecea; --orange:#c26a00; --orange-soft:#fff3e0;
+    --green:#1e7a46; --green-soft:#e6f4ec; --grey-soft:#eef0ef;
+    --radius:12px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,sans-serif;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.45}
+  button,input,select,textarea{font:inherit;color:inherit}
+  .hidden{display:none!important}
+  header{background:var(--brand);color:#fff;padding:14px 16px calc(14px);position:sticky;top:0;z-index:5}
+  header .row{display:flex;align-items:center;gap:10px;max-width:960px;margin:0 auto}
+  header h1{font-size:17px;margin:0;flex:1;font-weight:600}
+  header .who{font-size:12px;opacity:.85;text-align:right}
+  header button{background:rgba(255,255,255,.15);border:0;color:#fff;padding:6px 10px;border-radius:8px;cursor:pointer}
+  main{max-width:960px;margin:0 auto;padding:14px 14px 100px}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:10px;cursor:pointer;text-align:left}
+  .stat .n{font-size:24px;font-weight:700;line-height:1.1}
+  .stat .l{font-size:12px;color:var(--muted)}
+  .stat.active{outline:2px solid var(--brand)}
+  .stat.red .n{color:var(--red)} .stat.orange .n{color:var(--orange)} .stat.green .n{color:var(--green)}
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+  .toolbar input[type=search]{flex:1;min-width:180px;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:#fff}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+  .chip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:5px 12px;font-size:13px;cursor:pointer}
+  .chip.active{background:var(--brand);color:#fff;border-color:var(--brand)}
+  .list{display:flex;flex-direction:column;gap:8px}
+  .item{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--green);border-radius:var(--radius);padding:12px 14px;display:flex;gap:12px;align-items:center;cursor:pointer}
+  .item.s-expired{border-left-color:var(--red)} .item.s-soon{border-left-color:var(--orange)} .item.s-archived{border-left-color:#aaa;opacity:.7}
+  .item .main{flex:1;min-width:0}
+  .item .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .item .sub{font-size:13px;color:var(--muted)}
+  .tag{display:inline-block;font-size:11px;padding:1px 8px;border-radius:999px;background:var(--brand-soft);color:var(--brand);margin-right:6px;vertical-align:1px}
+  .days{text-align:right;flex-shrink:0}
+  .days .d{font-weight:700;font-size:15px}
+  .days .date{font-size:12px;color:var(--muted)}
+  .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600}
+  .pill.expired{background:var(--red-soft);color:var(--red)} .pill.soon{background:var(--orange-soft);color:var(--orange)} .pill.ok{background:var(--green-soft);color:var(--green)} .pill.archived{background:var(--grey-soft);color:#666}
+  .empty{text-align:center;color:var(--muted);padding:40px 10px}
+  .btn{border:1px solid var(--line);background:#fff;padding:9px 14px;border-radius:10px;cursor:pointer;font-weight:500}
+  .btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+  .btn.danger{color:var(--red);border-color:#f0c4bf}
+  .btn:disabled{opacity:.5;cursor:default}
+  .fab{position:fixed;right:18px;bottom:calc(18px + env(safe-area-inset-bottom));background:var(--brand);color:#fff;border:0;border-radius:999px;padding:14px 20px;font-size:15px;font-weight:600;box-shadow:0 6px 18px rgba(0,0,0,.2);cursor:pointer}
+  /* login */
+  .login{max-width:360px;margin:12vh auto;background:#fff;border:1px solid var(--line);border-radius:16px;padding:26px}
+  .login h2{margin:0 0 4px;font-size:20px}
+  .login p{margin:0 0 18px;color:var(--muted);font-size:13px}
+  label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+  .inp{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff}
+  textarea.inp{min-height:70px;resize:vertical}
+  .err{color:var(--red);font-size:13px;margin-top:10px;min-height:1em}
+  /* modal */
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:flex-end;justify-content:center;z-index:20}
+  @media(min-width:640px){.overlay{align-items:center}}
+  .modal{background:#fff;width:100%;max-width:560px;max-height:92vh;overflow:auto;border-radius:16px 16px 0 0;padding:18px 18px calc(18px + env(safe-area-inset-bottom))}
+  @media(min-width:640px){.modal{border-radius:16px}}
+  .modal h3{margin:0 0 4px;font-size:18px}
+  .modal .head{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px}
+  .modal .head .x{margin-left:auto;border:0;background:var(--grey-soft);border-radius:999px;width:32px;height:32px;cursor:pointer;flex-shrink:0}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+  .kv{display:grid;grid-template-columns:110px 1fr;gap:6px 10px;font-size:14px;margin:8px 0 14px}
+  .kv dt{color:var(--muted)} .kv dd{margin:0;word-break:break-word}
+  .section-t{font-size:13px;font-weight:600;color:var(--muted);margin:16px 0 6px;text-transform:uppercase;letter-spacing:.03em}
+  .files{display:flex;flex-direction:column;gap:6px}
+  .file{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:14px}
+  .file .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .file a,.file button{border:0;background:none;color:var(--brand);cursor:pointer;font-weight:600;padding:0 4px}
+  .file button.rm{color:var(--red)}
+  .hist{border:1px dashed var(--line);border-radius:10px;padding:8px 10px;margin-bottom:6px;font-size:13px}
+  .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
+  .actions .btn{flex:1;min-width:90px}
+  .hint{font-size:12px;color:var(--muted);margin-top:4px}
+  .toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;z-index:50}
+  @media(max-width:520px){.stats{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<!-- 登入 -->
+<div id="loginView" class="hidden">
+  <form class="login" id="loginForm">
+    <h2>📅 到期提醒系统</h2>
+    <p>Eternalgy · 车险 / Road Tax / 证书 / 执照</p>
+    <label>Email</label>
+    <input class="inp" type="email" id="loginEmail" required autocomplete="username">
+    <label>密码 Password</label>
+    <input class="inp" type="password" id="loginPass" required autocomplete="current-password">
+    <div class="err" id="loginErr"></div>
+    <button class="btn primary" style="width:100%;margin-top:8px" id="loginBtn">登入</button>
+  </form>
+</div>
+
+<!-- 主页 -->
+<div id="appView" class="hidden">
+  <header><div class="row">
+    <h1>📅 到期提醒</h1>
+    <div class="who"><div id="whoEmail"></div><div id="whoRole"></div></div>
+    <button id="logoutBtn">登出</button>
+  </div></header>
+  <main>
+    <div class="stats">
+      <button class="stat red" data-f="expired"><div class="n" id="cExpired">0</div><div class="l">已过期</div></button>
+      <button class="stat orange" data-f="soon"><div class="n" id="cSoon">0</div><div class="l">30天内到期</div></button>
+      <button class="stat green" data-f="ok"><div class="n" id="cOk">0</div><div class="l">正常</div></button>
+      <button class="stat active" data-f="all"><div class="n" id="cAll">0</div><div class="l">全部</div></button>
+    </div>
+    <div class="toolbar">
+      <input type="search" id="q" placeholder="🔍 搜寻 名称 / 车牌 / 持有人 / 号码">
+      <select class="inp" id="showArchived" style="width:auto">
+        <option value="0">不显示已停用</option>
+        <option value="1">显示已停用</option>
+      </select>
+    </div>
+    <div class="chips" id="chips"></div>
+    <div class="list" id="list"></div>
+  </main>
+  <button class="fab hidden" id="addBtn">＋ 新增</button>
+</div>
+
+<div id="modalRoot"></div>
+
+<script src="config.js"></script>
+<script type="module">
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+const CATEGORIES = ["车险 Insurance", "Road Tax", "Puspakom", "证书 Certification", "执照 Licence", "其他 Others"];
+const SOON_DAYS = 30;
+const BUCKET = "documents";
+
+const cfg = window.APP_CONFIG || {};
+if (!cfg.SUPABASE_URL || cfg.SUPABASE_URL.includes("YOUR-PROJECT")) {
+  document.body.innerHTML = `<div class="login"><h2>⚙️ 还没设定</h2><p>请先在 config.js 填入 Supabase 的网址和 Key。</p></div>`;
+  throw new Error("config.js not set");
+}
+const sb = createClient(cfg.SUPABASE_URL, cfg.SUPABASE_KEY);
+
+let state = { user: null, isAdmin: false, records: [], filter: "all", cat: "全部", q: "", showArchived: false };
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+
+// ---------- 日期 ----------
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function daysLeft(dateStr) {
+  if (!dateStr) return null;
+  const a = Date.UTC(...todayStr().split("-").map((v,i)=> i===1 ? v-1 : +v));
+  const b = Date.UTC(...dateStr.split("-").map((v,i)=> i===1 ? v-1 : +v));
+  return Math.round((b - a) / 86400000);
+}
+function fmtDate(s) {
+  if (!s) return "—";
+  const [y,m,d] = s.split("-");
+  return `${d}/${m}/${y}`;
+}
+function status(r) {
+  if (r.archived) return "archived";
+  const d = daysLeft(r.expiry_date);
+  if (d < 0) return "expired";
+  if (d <= SOON_DAYS) return "soon";
+  return "ok";
+}
+function daysText(r) {
+  if (r.archived) return "已停用";
+  const d = daysLeft(r.expiry_date);
+  if (d < 0) return `过期 ${-d} 天`;
+  if (d === 0) return "今天到期";
+  return `剩 ${d} 天`;
+}
+function fmtSize(n) {
+  if (!n) return "";
+  return n > 1048576 ? (n/1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n/1024)) + " KB";
+}
+
+// ---------- 提示 ----------
+function toast(msg) {
+  const t = document.createElement("div");
+  t.className = "toast"; t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+
+// ---------- 登入 ----------
+$("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("loginErr").textContent = ""; $("loginBtn").disabled = true;
+  const { error } = await sb.auth.signInWithPassword({ email: $("loginEmail").value.trim(), password: $("loginPass").value });
+  $("loginBtn").disabled = false;
+  if (error) $("loginErr").textContent = "登入失败：Email 或密码不正确";
+});
+$("logoutBtn").addEventListener("click", () => sb.auth.signOut());
+
+sb.auth.onAuthStateChange((_evt, session) => { setTimeout(() => onSession(session), 0); });
+
+let lastUserId = undefined;
+async function onSession(session) {
+  const uid = session?.user?.id || null;
+  if (uid === lastUserId) return;
+  lastUserId = uid;
+  if (!session) {
+    state.user = null;
+    $("appView").classList.add("hidden");
+    $("loginView").classList.remove("hidden");
+    return;
+  }
+  state.user = session.user;
+  const { data: adm } = await sb.from("app_admins").select("email");
+  const me = (session.user.email || "").toLowerCase();
+  state.isAdmin = (adm || []).some(a => (a.email || "").toLowerCase() === me);
+  $("whoEmail").textContent = session.user.email;
+  $("whoRole").textContent = state.isAdmin ? "管理员（可修改）" : "只能查看";
+  $("addBtn").classList.toggle("hidden", !state.isAdmin);
+  $("loginView").classList.add("hidden");
+  $("appView").classList.remove("hidden");
+  await loadRecords();
+}
+
+// ---------- 读取 ----------
+async function loadRecords() {
+  const { data, error } = await sb.from("records").select("*").order("expiry_date", { ascending: true });
+  if (error) { toast("读取资料失败：" + error.message); return; }
+  state.records = data || [];
+  render();
+}
+
+// ---------- 主页列表 ----------
+function render() {
+  const active = state.records.filter(r => !r.archived);
+  $("cExpired").textContent = active.filter(r => status(r) === "expired").length;
+  $("cSoon").textContent    = active.filter(r => status(r) === "soon").length;
+  $("cOk").textContent      = active.filter(r => status(r) === "ok").length;
+  $("cAll").textContent     = active.length;
+  document.querySelectorAll(".stat").forEach(b => b.classList.toggle("active", b.dataset.f === state.filter));
+
+  const cats = ["全部", ...CATEGORIES];
+  $("chips").innerHTML = cats.map(c => `<button class="chip ${c===state.cat?"active":""}" data-c="${esc(c)}">${esc(c)}</button>`).join("");
+
+  const q = state.q.toLowerCase();
+  let rows = state.records.filter(r => {
+    if (r.archived && !state.showArchived) return false;
+    if (state.filter !== "all" && status(r) !== state.filter) return false;
+    if (state.cat !== "全部" && r.category !== state.cat) return false;
+    if (q && ![r.title, r.holder, r.ref_no, r.category, r.notes].some(v => (v||"").toLowerCase().includes(q))) return false;
+    return true;
+  });
+  rows.sort((a,b) => (a.archived - b.archived) || a.expiry_date.localeCompare(b.expiry_date));
+
+  if (!rows.length) {
+    $("list").innerHTML = `<div class="empty">${state.records.length ? "没有符合的记录" : (state.isAdmin ? "还没有记录，按右下角「＋ 新增」开始" : "还没有记录")}</div>`;
+    return;
+  }
+  $("list").innerHTML = rows.map(r => {
+    const s = status(r);
+    const nFiles = (r.files || []).length;
+    const pillCls = s === "expired" ? "expired" : s === "soon" ? "soon" : s === "archived" ? "archived" : "ok";
+    return `<div class="item s-${s}" data-id="${r.id}">
+      <div class="main">
+        <div class="t">${esc(r.title)}</div>
+        <div class="sub"><span class="tag">${esc(r.category)}</span>${esc(r.holder || "")}${nFiles ? ` · 📎${nFiles}` : ""}</div>
+      </div>
+      <div class="days"><div class="d"><span class="pill ${pillCls}">${daysText(r)}</span></div><div class="date">${fmtDate(r.expiry_date)}</div></div>
+    </div>`;
+  }).join("");
+}
+
+document.querySelector(".stats").addEventListener("click", e => {
+  const b = e.target.closest(".stat"); if (!b) return;
+  state.filter = b.dataset.f; render();
+});
+$("chips").addEventListener("click", e => {
+  const b = e.target.closest(".chip"); if (!b) return;
+  state.cat = b.dataset.c; render();
+});
+$("q").addEventListener("input", e => { state.q = e.target.value; render(); });
+$("showArchived").addEventListener("change", e => { state.showArchived = e.target.value === "1"; render(); });
+$("list").addEventListener("click", e => {
+  const it = e.target.closest(".item"); if (!it) return;
+  const r = state.records.find(x => x.id === it.dataset.id);
+  if (r) openDetail(r);
+});
+$("addBtn").addEventListener("click", () => openForm(null));
+
+// ---------- Modal 工具 ----------
+function openModal(html) {
+  $("modalRoot").innerHTML = `<div class="overlay"><div class="modal">${html}</div></div>`;
+  const ov = $("modalRoot").querySelector(".overlay");
+  ov.addEventListener("click", e => { if (e.target === ov) closeModal(); });
+  ov.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", closeModal));
+  return ov;
+}
+function closeModal() { $("modalRoot").innerHTML = ""; }
+
+// ---------- 文件 ----------
+async function openFile(path) {
+  const w = window.open("", "_blank");
+  const { data, error } = await sb.storage.from(BUCKET).createSignedUrl(path, 600);
+  if (error || !data?.signedUrl) { if (w) w.close(); toast("打不开文件：" + (error?.message || "")); return; }
+  if (w) w.location.href = data.signedUrl; else location.href = data.signedUrl;
+}
+function safeExt(name) {
+  const m = /\.([a-z0-9]{1,6})$/i.exec(name || ""); return m ? m[1].toLowerCase() : "bin";
+}
+async function uploadFiles(recordId, fileList) {
+  const out = [];
+  for (const f of fileList) {
+    const path = `${recordId}/${Date.now()}-${Math.random().toString(36).slice(2,8)}.${safeExt(f.name)}`;
+    const { error } = await sb.storage.from(BUCKET).upload(path, f, { contentType: f.type || undefined, upsert: false });
+    if (error) throw new Error(`上传「${f.name}」失败：${error.message}`);
+    out.push({ path, name: f.name, size: f.size, type: f.type, uploaded_at: new Date().toISOString() });
+  }
+  return out;
+}
+async function removeFiles(paths) {
+  const p = paths.filter(Boolean);
+  if (p.length) await sb.storage.from(BUCKET).remove(p);
+}
+function filesHtml(files, removable = false) {
+  if (!files?.length) return `<div class="hint">没有文件</div>`;
+  return `<div class="files">${files.map((f,i) => `
+    <div class="file"><span>${/pdf$/i.test(f.name||"") ? "📄" : /\.(jpe?g|png|heic|webp|gif)$/i.test(f.name||"") ? "🖼️" : "📎"}</span>
+      <span class="nm">${esc(f.name)}</span><span class="hint">${fmtSize(f.size)}</span>
+      <button type="button" data-open="${esc(f.path)}">打开</button>
+      ${removable ? `<button type="button" class="rm" data-rm="${i}">删除</button>` : ""}
+    </div>`).join("")}</div>`;
+}
+function wireOpenButtons(root) {
+  root.querySelectorAll("[data-open]").forEach(b => b.addEventListener("click", () => openFile(b.dataset.open)));
+}
+
+// ---------- 详情 ----------
+function openDetail(r) {
+  const s = status(r);
+  const pillCls = s === "expired" ? "expired" : s === "soon" ? "soon" : s === "archived" ? "archived" : "ok";
+  const hist = (r.history || []).slice().reverse();
+  const ov = openModal(`
+    <div class="head"><div><span class="tag">${esc(r.category)}</span><h3>${esc(r.title)}</h3></div><button class="x" data-close>✕</button></div>
+    <div><span class="pill ${pillCls}">${daysText(r)}</span></div>
+    <dl class="kv">
+      <dt>到期日</dt><dd><b>${fmtDate(r.expiry_date)}</b></dd>
+      <dt>发出 / 开始日</dt><dd>${fmtDate(r.issue_date)}</dd>
+      <dt>车牌 / 持有人</dt><dd>${esc(r.holder || "—")}</dd>
+      <dt>号码</dt><dd>${esc(r.ref_no || "—")}</dd>
+      <dt>备注</dt><dd style="white-space:pre-wrap">${esc(r.notes || "—")}</dd>
+    </dl>
+    <div class="section-t">文件</div>
+    ${filesHtml(r.files)}
+    ${hist.length ? `<div class="section-t">续期记录</div>${hist.map(h => `
+      <div class="hist"><div>旧到期日 <b>${fmtDate(h.expiry_date)}</b>${h.ref_no ? ` · ${esc(h.ref_no)}` : ""} <span class="hint">（${(h.renewed_at||"").slice(0,10)} 续期）</span></div>
+      ${(h.files||[]).length ? filesHtml(h.files) : ""}</div>`).join("")}` : ""}
+    ${state.isAdmin ? `<div class="actions">
+      <button class="btn primary" id="dRenew">🔄 续期</button>
+      <button class="btn" id="dEdit">✏️ 编辑</button>
+      <button class="btn" id="dArchive">${r.archived ? "♻️ 恢复" : "⏸ 停用"}</button>
+      <button class="btn danger" id="dDel">🗑 删除</button>
+    </div>
+    <div class="hint" style="margin-top:8px">「停用」= 不再需要续期（例如车已卖掉），不会再发提醒，资料保留。</div>` : ""}
+  `);
+  wireOpenButtons(ov);
+  if (!state.isAdmin) return;
+  ov.querySelector("#dRenew").onclick = () => openRenew(r);
+  ov.querySelector("#dEdit").onclick = () => openForm(r);
+  ov.querySelector("#dArchive").onclick = async () => {
+    const { error } = await sb.from("records").update({ archived: !r.archived, updated_at: new Date().toISOString() }).eq("id", r.id);
+    if (error) return toast("失败：" + error.message);
+    closeModal(); toast(r.archived ? "已恢复" : "已停用"); loadRecords();
+  };
+  ov.querySelector("#dDel").onclick = async () => {
+    if (!confirm(`确定要永久删除「${r.title}」和它所有的文件吗？\n（不能复原。如果只是不用了，建议按「停用」）`)) return;
+    const paths = [...(r.files||[]), ...(r.history||[]).flatMap(h => h.files || [])].map(f => f.path);
+    const { error } = await sb.from("records").delete().eq("id", r.id);
+    if (error) return toast("删除失败：" + error.message);
+    await removeFiles(paths);
+    closeModal(); toast("已删除"); loadRecords();
+  };
+}
+
+// ---------- 新增 / 编辑 ----------
+function openForm(r) {
+  const isNew = !r;
+  let keptFiles = isNew ? [] : [...(r.files || [])];
+  const removed = [];
+  const ov = openModal(`
+    <div class="head"><h3>${isNew ? "新增记录" : "编辑记录"}</h3><button class="x" data-close>✕</button></div>
+    <form id="f">
+      <label>类别 *</label>
+      <select class="inp" name="category" required>${CATEGORIES.map(c => `<option ${r?.category===c?"selected":""}>${esc(c)}</option>`).join("")}</select>
+      <label>名称 *</label>
+      <input class="inp" name="title" required placeholder="例：Hilux 车险 / CIDB 证书 / 电工执照" value="${esc(r?.title)}">
+      <div class="grid2">
+        <div><label>车牌 / 持有人</label><input class="inp" name="holder" placeholder="例：VKA 1234 / 陈大明" value="${esc(r?.holder)}"></div>
+        <div><label>保单 / 证件号码</label><input class="inp" name="ref_no" value="${esc(r?.ref_no)}"></div>
+        <div><label>发出 / 开始日</label><input class="inp" type="date" name="issue_date" value="${esc(r?.issue_date || "")}"></div>
+        <div><label>到期日 *</label><input class="inp" type="date" name="expiry_date" required value="${esc(r?.expiry_date || "")}"></div>
+      </div>
+      <label>备注</label>
+      <textarea class="inp" name="notes" placeholder="例：保险公司、代理电话、续期要准备的东西">${esc(r?.notes)}</textarea>
+      <label>文件</label>
+      <div id="kept"></div>
+      <input class="inp" type="file" name="newfiles" multiple accept=".pdf,image/*,.doc,.docx,.xls,.xlsx" style="margin-top:6px">
+      <div class="hint">可以一次选几个文件（PDF、照片都可以，用手机可以直接拍照）。</div>
+      <div class="err" id="fErr"></div>
+      <div class="actions"><button type="button" class="btn" data-close>取消</button><button class="btn primary" id="fSave">保存</button></div>
+    </form>
+  `);
+  const drawKept = () => {
+    ov.querySelector("#kept").innerHTML = keptFiles.length ? filesHtml(keptFiles, true) : "";
+    wireOpenButtons(ov.querySelector("#kept"));
+    ov.querySelectorAll("#kept [data-rm]").forEach(b => b.onclick = () => {
+      removed.push(keptFiles[+b.dataset.rm].path); keptFiles.splice(+b.dataset.rm, 1); drawKept();
+    });
+  };
+  drawKept();
+  ov.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", closeModal));
+  ov.querySelector("#f").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const btn = ov.querySelector("#fSave"); btn.disabled = true; btn.textContent = "保存中…";
+    try {
+      const id = isNew ? crypto.randomUUID() : r.id;
+      const newFiles = await uploadFiles(id, fd.getAll("newfiles").filter(f => f && f.size));
+      const row = {
+        category: fd.get("category"),
+        title: fd.get("title").trim(),
+        holder: fd.get("holder").trim() || null,
+        ref_no: fd.get("ref_no").trim() || null,
+        issue_date: fd.get("issue_date") || null,
+        expiry_date: fd.get("expiry_date"),
+        notes: fd.get("notes").trim() || null,
+        files: [...keptFiles, ...newFiles],
+        updated_at: new Date().toISOString(),
+      };
+      // 改了到期日 → 重新开始提醒
+      if (!isNew && row.expiry_date !== r.expiry_date) row.notified_stage = null;
+      const { error } = isNew
+        ? await sb.from("records").insert({ id, ...row })
+        : await sb.from("records").update(row).eq("id", id);
+      if (error) { await removeFiles(newFiles.map(f => f.path)); throw new Error(error.message); }
+      await removeFiles(removed);
+      closeModal(); toast("已保存"); loadRecords();
+    } catch (err) {
+      ov.querySelector("#fErr").textContent = err.message;
+      btn.disabled = false; btn.textContent = "保存";
+    }
+  });
+}
+
+// ---------- 续期 ----------
+function openRenew(r) {
+  const ov = openModal(`
+    <div class="head"><div><span class="tag">${esc(r.category)}</span><h3>续期：${esc(r.title)}</h3></div><button class="x" data-close>✕</button></div>
+    <div class="hint">旧的到期日 <b>${fmtDate(r.expiry_date)}</b> 和旧文件会自动存进「续期记录」。</div>
+    <form id="rf">
+      <div class="grid2">
+        <div><label>新的开始日</label><input class="inp" type="date" name="issue_date" value="${esc(r.expiry_date)}"></div>
+        <div><label>新的到期日 *</label><input class="inp" type="date" name="expiry_date" required></div>
+      </div>
+      <label>新的保单 / 证件号码（不变可以留空）</label>
+      <input class="inp" name="ref_no" placeholder="${esc(r.ref_no || "")}">
+      <label>上传新的文件</label>
+      <input class="inp" type="file" name="newfiles" multiple accept=".pdf,image/*,.doc,.docx,.xls,.xlsx">
+      <div class="err" id="rErr"></div>
+      <div class="actions"><button type="button" class="btn" data-close>取消</button><button class="btn primary" id="rSave">确认续期</button></div>
+    </form>
+  `);
+  ov.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", closeModal));
+  ov.querySelector("#rf").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const btn = ov.querySelector("#rSave"); btn.disabled = true; btn.textContent = "处理中…";
+    try {
+      if (fd.get("expiry_date") <= r.expiry_date && !confirm("新的到期日没有比旧的晚，确定吗？")) { btn.disabled = false; btn.textContent = "确认续期"; return; }
+      const newFiles = await uploadFiles(r.id, fd.getAll("newfiles").filter(f => f && f.size));
+      const history = [...(r.history || []), {
+        expiry_date: r.expiry_date, issue_date: r.issue_date, ref_no: r.ref_no,
+        files: r.files || [], renewed_at: new Date().toISOString(),
+      }];
+      const { error } = await sb.from("records").update({
+        expiry_date: fd.get("expiry_date"),
+        issue_date: fd.get("issue_date") || null,
+        ref_no: (fd.get("ref_no") || "").trim() || r.ref_no,
+        files: newFiles,
+        history,
+        notified_stage: null,
+        archived: false,
+        updated_at: new Date().toISOString(),
+      }).eq("id", r.id);
+      if (error) { await removeFiles(newFiles.map(f => f.path)); throw new Error(error.message); }
+      closeModal(); toast("续期完成 ✅"); loadRecords();
+    } catch (err) {
+      ov.querySelector("#rErr").textContent = err.message;
+      btn.disabled = false; btn.textContent = "确认续期";
+    }
+  });
+}
+
+// 每次回到这个页面时更新天数
+document.addEventListener("visibilitychange", () => { if (!document.hidden && state.user) loadRecords(); });
+</script>
+</body>
+</html>
