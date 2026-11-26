@@ -21,7 +21,10 @@
   header{background:var(--brand);color:#fff;padding:14px 16px calc(14px);position:sticky;top:0;z-index:5}
   header .row{display:flex;align-items:center;gap:10px;max-width:960px;margin:0 auto}
   header h1{font-size:17px;margin:0;flex:1;font-weight:600}
-  header .who{font-size:12px;opacity:.85;text-align:right}
+  header .who{font-size:12px;opacity:.85;text-align:right;min-width:0}
+  header .who div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  header h1{white-space:nowrap}
+  @media(max-width:430px){header .who #whoEmail{max-width:90px}}
   header button{background:rgba(255,255,255,.15);border:0;color:#fff;padding:6px 10px;border-radius:8px;cursor:pointer}
   main{max-width:960px;margin:0 auto;padding:14px 14px 40px}
   .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
@@ -60,6 +63,14 @@
   label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
   .inp{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff}
   textarea.inp{min-height:70px;resize:vertical}
+  .tabs{display:flex;background:var(--grey-soft);border-radius:10px;padding:3px;margin-bottom:6px}
+  .tab{flex:1;border:0;background:none;padding:8px;border-radius:8px;cursor:pointer;color:var(--muted);font-weight:500}
+  .tab.active{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.1)}
+  .inp.pin{letter-spacing:.5em;font-size:20px;text-align:center}
+  .staffrow{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:6px}
+  .staffrow .nm{flex:1;font-weight:600}
+  .staffrow button{border:0;background:none;cursor:pointer;font-weight:600;color:var(--brand)}
+  .staffrow button.rm{color:var(--red)}
   .err{color:var(--red);font-size:13px;margin-top:10px;min-height:1em}
   /* modal */
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:flex-end;justify-content:center;z-index:20}
@@ -93,10 +104,19 @@
   <form class="login" id="loginForm">
     <h2>📅 到期提醒系统</h2>
     <p>Eternalgy · 车险 / Road Tax / 证书 / 执照</p>
-    <label>Email</label>
-    <input class="inp" type="email" id="loginEmail" required autocomplete="username">
-    <label>密码 Password</label>
-    <input class="inp" type="password" id="loginPass" required autocomplete="current-password">
+    <div class="tabs"><button type="button" class="tab active" data-mode="staff">员工登入</button><button type="button" class="tab" data-mode="admin">管理员登入</button></div>
+    <div id="staffFields">
+      <label>名字 Name</label>
+      <input class="inp" id="loginName" autocomplete="username">
+      <label>4 位 PIN</label>
+      <input class="inp pin" id="loginPin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="current-password">
+    </div>
+    <div id="adminFields" class="hidden">
+      <label>Email</label>
+      <input class="inp" type="email" id="loginEmail" autocomplete="username">
+      <label>密码 Password</label>
+      <input class="inp" type="password" id="loginPass" autocomplete="current-password">
+    </div>
     <div class="err" id="loginErr"></div>
     <button class="btn primary" style="width:100%;margin-top:8px" id="loginBtn">登入</button>
   </form>
@@ -107,6 +127,7 @@
   <header><div class="row">
     <h1>📅 到期提醒</h1>
     <div class="who"><div id="whoEmail"></div><div id="whoRole"></div></div>
+    <button id="staffBtn" class="hidden">👥 员工</button>
     <button id="logoutBtn">登出</button>
   </div></header>
   <main>
@@ -134,6 +155,7 @@
 <script src="config.js"></script>
 <script type="module">
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+import { staffEmail, staffPassword, STAFF_DOMAIN } from "./staff-id.mjs";
 
 const CATEGORIES = ["车险 Insurance", "Road Tax", "Puspakom", "证书 Certification", "执照 Licence", "其他 Others"];
 const SOON_DAYS = 30;
@@ -195,12 +217,43 @@ function toast(msg) {
 }
 
 // ---------- 登入 ----------
+let loginMode = "staff";
+try { if (localStorage.getItem("loginMode") === "admin") loginMode = "admin"; } catch {}
+function setLoginMode(m) {
+  loginMode = m;
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.mode === m));
+  $("staffFields").classList.toggle("hidden", m !== "staff");
+  $("adminFields").classList.toggle("hidden", m !== "admin");
+  $("loginErr").textContent = "";
+  try { localStorage.setItem("loginMode", m); } catch {}
+}
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => setLoginMode(t.dataset.mode)));
+setLoginMode(loginMode);
+try { const n = localStorage.getItem("lastStaffName"); if (n) $("loginName").value = n; } catch {}
+$("loginPin").addEventListener("input", e => { e.target.value = e.target.value.replace(/\D/g, "").slice(0, 4); });
+
 $("loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  $("loginErr").textContent = ""; $("loginBtn").disabled = true;
-  const { error } = await sb.auth.signInWithPassword({ email: $("loginEmail").value.trim(), password: $("loginPass").value });
+  $("loginErr").textContent = "";
+  let email, password;
+  if (loginMode === "staff") {
+    const name = $("loginName").value.trim(), pin = $("loginPin").value;
+    if (!name) { $("loginErr").textContent = "请填名字"; return; }
+    if (!/^\d{4}$/.test(pin)) { $("loginErr").textContent = "PIN 要 4 位数字"; return; }
+    email = staffEmail(name); password = staffPassword(pin);
+  } else {
+    email = $("loginEmail").value.trim(); password = $("loginPass").value;
+    if (!email || !password) { $("loginErr").textContent = "请填 Email 和密码"; return; }
+  }
+  $("loginBtn").disabled = true;
+  const { error } = await sb.auth.signInWithPassword({ email, password });
   $("loginBtn").disabled = false;
-  if (error) $("loginErr").textContent = "登入失败：Email 或密码不正确";
+  if (error) {
+    $("loginErr").textContent = loginMode === "staff" ? "登入失败：名字或 PIN 不正确" : "登入失败：Email 或密码不正确";
+  } else if (loginMode === "staff") {
+    try { localStorage.setItem("lastStaffName", $("loginName").value.trim()); } catch {}
+    $("loginPin").value = "";
+  }
 });
 $("logoutBtn").addEventListener("click", () => sb.auth.signOut());
 
@@ -221,9 +274,11 @@ async function onSession(session) {
   const { data: adm } = await sb.from("app_admins").select("email");
   const me = (session.user.email || "").toLowerCase();
   state.isAdmin = (adm || []).some(a => (a.email || "").toLowerCase() === me);
-  $("whoEmail").textContent = session.user.email;
+  const isStaff = (session.user.email || "").endsWith("@" + STAFF_DOMAIN);
+  $("whoEmail").textContent = isStaff ? (session.user.user_metadata?.name || "员工") : session.user.email;
   $("whoRole").textContent = state.isAdmin ? "管理员（可修改）" : "只能查看";
   $("addBtn").classList.toggle("hidden", !state.isAdmin);
+  $("staffBtn").classList.toggle("hidden", !state.isAdmin);
   $("loginView").classList.add("hidden");
   $("appView").classList.remove("hidden");
   await loadRecords();
@@ -506,6 +561,76 @@ function openRenew(r) {
     }
   });
 }
+
+// ---------- 员工管理（只有管理员） ----------
+async function staffApi(payload) {
+  const { data: { session } } = await sb.auth.getSession();
+  const res = await fetch("/api/staff", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session?.access_token || ""}` },
+    body: JSON.stringify(payload),
+  });
+  let out = {};
+  try { out = await res.json(); } catch { out = { error: `服务器错误 (${res.status})` }; }
+  if (!res.ok || out.error) throw new Error(out.error || `服务器错误 (${res.status})`);
+  return out;
+}
+const askPin = (msg) => {
+  const p = prompt(msg);
+  if (p === null) return null;
+  if (!/^\d{4}$/.test(p.trim())) { alert("PIN 要 4 位数字"); return null; }
+  return p.trim();
+};
+function openStaff() {
+  const ov = openModal(`
+    <div class="head"><div><h3>👥 员工账号</h3><div class="hint">员工用「名字 + 4 位 PIN」登入，只能查看，不能修改。</div></div><button class="x" data-close>✕</button></div>
+    <form id="sf" class="grid2" style="align-items:end">
+      <div><label>名字</label><input class="inp" name="name" required maxlength="20" placeholder="例：Annie"></div>
+      <div><label>4 位 PIN</label><input class="inp pin" name="pin" required inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="1234"></div>
+    </form>
+    <button class="btn primary" id="sfAdd" style="width:100%;margin-top:10px">＋ 新增员工</button>
+    <div class="err" id="sErr"></div>
+    <div class="section-t">员工名单</div>
+    <div id="sList"><div class="hint">读取中…</div></div>
+  `);
+  const draw = async () => {
+    try {
+      const { staff } = await staffApi({ action: "list" });
+      ov.querySelector("#sList").innerHTML = staff.length ? staff.map(u => `
+        <div class="staffrow"><span class="nm">${esc(u.name)}</span>
+          <span class="hint">${u.last_sign_in_at ? "最近登入 " + u.last_sign_in_at.slice(0,10) : "还没登入过"}</span>
+          <button data-reset="${u.id}" data-n="${esc(u.name)}">改 PIN</button>
+          <button class="rm" data-del="${u.id}" data-n="${esc(u.name)}">删除</button></div>`).join("")
+        : `<div class="hint">还没有员工</div>`;
+      ov.querySelectorAll("[data-reset]").forEach(b => b.onclick = async () => {
+        const pin = askPin(`「${b.dataset.n}」的新 PIN（4 位数字）：`); if (!pin) return;
+        try { await staffApi({ action: "reset", id: b.dataset.reset, pin }); toast("PIN 已更改"); } catch (e) { ov.querySelector("#sErr").textContent = e.message; }
+      });
+      ov.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
+        if (!confirm(`确定删除员工「${b.dataset.n}」？删除后他就不能再登入。`)) return;
+        try { await staffApi({ action: "delete", id: b.dataset.del }); toast("已删除"); draw(); } catch (e) { ov.querySelector("#sErr").textContent = e.message; }
+      });
+    } catch (e) {
+      ov.querySelector("#sList").innerHTML = "";
+      ov.querySelector("#sErr").textContent = e.message;
+    }
+  };
+  const f = ov.querySelector("#sf");
+  f.pin.addEventListener("input", e => { e.target.value = e.target.value.replace(/\D/g, "").slice(0, 4); });
+  ov.querySelector("#sfAdd").onclick = async () => {
+    ov.querySelector("#sErr").textContent = "";
+    const name = f.name.value.trim(), pin = f.pin.value.trim();
+    if (!name) return ov.querySelector("#sErr").textContent = "请填名字";
+    if (!/^\d{4}$/.test(pin)) return ov.querySelector("#sErr").textContent = "PIN 要 4 位数字";
+    const btn = ov.querySelector("#sfAdd"); btn.disabled = true;
+    try { await staffApi({ action: "create", name, pin }); toast(`已新增「${name}」`); f.reset(); draw(); }
+    catch (e) { ov.querySelector("#sErr").textContent = e.message; }
+    btn.disabled = false;
+  };
+  f.addEventListener("submit", e => { e.preventDefault(); ov.querySelector("#sfAdd").click(); });
+  draw();
+}
+$("staffBtn").addEventListener("click", openStaff);
 
 // 每次回到这个页面时更新天数
 document.addEventListener("visibilitychange", () => { if (!document.hidden && state.user) loadRecords(); });
