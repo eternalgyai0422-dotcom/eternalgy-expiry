@@ -140,6 +140,7 @@
     <div class="toolbar">
       <button class="btn primary hidden" id="addBtn">＋ 新增</button>
       <input type="search" id="q" placeholder="🔍 搜寻 名称 / 车牌 / 持有人 / 号码">
+      <button class="btn hidden" id="trashBtn">🗑 垃圾桶</button>
       <select class="inp" id="showArchived" style="width:auto">
         <option value="0">不显示已停用</option>
         <option value="1">显示已停用</option>
@@ -159,6 +160,7 @@ import { staffEmail, staffPassword, STAFF_DOMAIN } from "./staff-id.mjs";
 
 const CATEGORIES = ["车险 Insurance", "Road Tax", "Puspakom", "证书 Certification", "执照 Licence", "其他 Others"];
 const SOON_DAYS = 30;
+const TRASH_DAYS = 100; // 垃圾桶保留天数（每天自动检查时清掉过期的）
 const BUCKET = "documents";
 
 const cfg = window.APP_CONFIG || {};
@@ -279,6 +281,7 @@ async function onSession(session) {
   $("whoRole").textContent = state.isAdmin ? "管理员（可修改）" : "只能查看";
   $("addBtn").classList.toggle("hidden", !state.isAdmin);
   $("staffBtn").classList.toggle("hidden", !state.isAdmin);
+  $("trashBtn").classList.toggle("hidden", !state.isAdmin);
   $("loginView").classList.add("hidden");
   $("appView").classList.remove("hidden");
   await loadRecords();
@@ -288,7 +291,8 @@ async function onSession(session) {
 async function loadRecords() {
   const { data, error } = await sb.from("records").select("*").order("expiry_date", { ascending: true });
   if (error) { toast("读取资料失败：" + error.message); return; }
-  state.records = data || [];
+  state.all = data || [];
+  state.records = state.all.filter(r => !r.deleted_at);
   render();
 }
 
@@ -434,12 +438,10 @@ function openDetail(r) {
     closeModal(); toast(r.archived ? "已恢复" : "已停用"); loadRecords();
   };
   ov.querySelector("#dDel").onclick = async () => {
-    if (!confirm(`确定要永久删除「${r.title}」和它所有的文件吗？\n（不能复原。如果只是不用了，建议按「停用」）`)) return;
-    const paths = [...(r.files||[]), ...(r.history||[]).flatMap(h => h.files || [])].map(f => f.path);
-    const { error } = await sb.from("records").delete().eq("id", r.id);
+    if (!confirm(`把「${r.title}」移到垃圾桶？\n${TRASH_DAYS} 天内可以在「🗑 垃圾桶」还原。`)) return;
+    const { error } = await sb.from("records").update({ deleted_at: new Date().toISOString() }).eq("id", r.id);
     if (error) return toast("删除失败：" + error.message);
-    await removeFiles(paths);
-    closeModal(); toast("已删除"); loadRecords();
+    closeModal(); toast("已移到垃圾桶"); loadRecords();
   };
 }
 
@@ -447,7 +449,7 @@ function openDetail(r) {
 function openForm(r) {
   const isNew = !r;
   let keptFiles = isNew ? [] : [...(r.files || [])];
-  const removed = [];
+  const removed = []; // 被拿掉的文件 → 放进垃圾桶
   const ov = openModal(`
     <div class="head"><h3>${isNew ? "新增记录" : "编辑记录"}</h3><button class="x" data-close>✕</button></div>
     <form id="f">
@@ -475,7 +477,7 @@ function openForm(r) {
     ov.querySelector("#kept").innerHTML = keptFiles.length ? filesHtml(keptFiles, true) : "";
     wireOpenButtons(ov.querySelector("#kept"));
     ov.querySelectorAll("#kept [data-rm]").forEach(b => b.onclick = () => {
-      removed.push(keptFiles[+b.dataset.rm].path); keptFiles.splice(+b.dataset.rm, 1); drawKept();
+      removed.push(keptFiles[+b.dataset.rm]); keptFiles.splice(+b.dataset.rm, 1); drawKept();
     });
   };
   drawKept();
@@ -498,14 +500,17 @@ function openForm(r) {
         files: [...keptFiles, ...newFiles],
         updated_at: new Date().toISOString(),
       };
+      if (removed.length) {
+        const now = new Date().toISOString();
+        row.trash_files = [...(r?.trash_files || []), ...removed.map(f => ({ ...f, removed_at: now }))];
+      }
       // 改了到期日 → 重新开始提醒
       if (!isNew && row.expiry_date !== r.expiry_date) row.notified_stage = null;
       const { error } = isNew
         ? await sb.from("records").insert({ id, ...row })
         : await sb.from("records").update(row).eq("id", id);
       if (error) { await removeFiles(newFiles.map(f => f.path)); throw new Error(error.message); }
-      await removeFiles(removed);
-      closeModal(); toast("已保存"); loadRecords();
+      closeModal(); toast(removed.length ? "已保存（删掉的文件在垃圾桶）" : "已保存"); loadRecords();
     } catch (err) {
       ov.querySelector("#fErr").textContent = err.message;
       btn.disabled = false; btn.textContent = "保存";
@@ -631,6 +636,66 @@ function openStaff() {
   draw();
 }
 $("staffBtn").addEventListener("click", openStaff);
+
+// ---------- 垃圾桶（只有管理员） ----------
+function daysLeftInTrash(iso) {
+  const gone = new Date(iso).getTime() + TRASH_DAYS * 86400000;
+  return Math.max(0, Math.ceil((gone - Date.now()) / 86400000));
+}
+function openTrash() {
+  const all = state.all || [];
+  const delRecs = all.filter(r => r.deleted_at).sort((a,b) => b.deleted_at.localeCompare(a.deleted_at));
+  const delFiles = all.flatMap(r => (r.trash_files || []).map((f, i) => ({ f, i, r })))
+    .sort((a,b) => (b.f.removed_at||"").localeCompare(a.f.removed_at||""));
+  const ov = openModal(`
+    <div class="head"><div><h3>🗑 垃圾桶</h3><div class="hint">删掉的东西会留 ${TRASH_DAYS} 天，之后系统自动清掉。</div></div><button class="x" data-close>✕</button></div>
+    <div class="section-t">删掉的记录（${delRecs.length}）</div>
+    ${delRecs.length ? delRecs.map(r => `
+      <div class="staffrow"><span class="nm">${esc(r.title)}<div class="hint" style="font-weight:400">${esc(r.category)}${r.holder ? " · " + esc(r.holder) : ""} · ${r.deleted_at.slice(0,10)} 删除 · 还剩 ${daysLeftInTrash(r.deleted_at)} 天</div></span>
+        <button data-rrec="${r.id}">还原</button>
+        <button class="rm" data-prec="${r.id}">永久删除</button></div>`).join("") : `<div class="hint">没有</div>`}
+    <div class="section-t">删掉的文件（${delFiles.length}）</div>
+    ${delFiles.length ? delFiles.map(({f, i, r}) => `
+      <div class="staffrow"><span class="nm" style="min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(f.name)}<div class="hint" style="font-weight:400">来自「${esc(r.title)}」${r.deleted_at ? "（记录也在垃圾桶）" : ""} · 还剩 ${daysLeftInTrash(f.removed_at || r.updated_at)} 天</div></span>
+        <button data-open="${esc(f.path)}">打开</button>
+        ${r.deleted_at ? "" : `<button data-rfile="${r.id}|${i}">还原</button>`}
+        <button class="rm" data-pfile="${r.id}|${i}">永久删除</button></div>`).join("") : `<div class="hint">没有</div>`}
+    <div class="err" id="tErr"></div>
+  `);
+  wireOpenButtons(ov);
+  const fail = (e) => { ov.querySelector("#tErr").textContent = e.message || e; };
+  const done = async (msg) => { toast(msg); await loadRecords(); openTrash(); };
+  const find = (id) => all.find(x => x.id === id);
+
+  ov.querySelectorAll("[data-rrec]").forEach(b => b.onclick = async () => {
+    const { error } = await sb.from("records").update({ deleted_at: null, updated_at: new Date().toISOString() }).eq("id", b.dataset.rrec);
+    if (error) return fail(error); done("已还原");
+  });
+  ov.querySelectorAll("[data-prec]").forEach(b => b.onclick = async () => {
+    const r = find(b.dataset.prec);
+    if (!confirm(`永久删除「${r.title}」和它所有的文件？\n这个不能再找回来。`)) return;
+    const paths = [...(r.files||[]), ...(r.trash_files||[]), ...(r.history||[]).flatMap(h => h.files || [])].map(f => f.path);
+    const { error } = await sb.from("records").delete().eq("id", r.id);
+    if (error) return fail(error);
+    await removeFiles(paths); done("已永久删除");
+  });
+  ov.querySelectorAll("[data-rfile]").forEach(b => b.onclick = async () => {
+    const [id, i] = b.dataset.rfile.split("|"); const r = find(id);
+    const tf = [...(r.trash_files || [])]; const [f] = tf.splice(+i, 1);
+    const { removed_at, ...file } = f;
+    const { error } = await sb.from("records").update({ files: [...(r.files || []), file], trash_files: tf, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) return fail(error); done("文件已还原");
+  });
+  ov.querySelectorAll("[data-pfile]").forEach(b => b.onclick = async () => {
+    const [id, i] = b.dataset.pfile.split("|"); const r = find(id);
+    const tf = [...(r.trash_files || [])]; const [f] = tf.splice(+i, 1);
+    if (!confirm(`永久删除文件「${f.name}」？\n这个不能再找回来。`)) return;
+    const { error } = await sb.from("records").update({ trash_files: tf }).eq("id", id);
+    if (error) return fail(error);
+    await removeFiles([f.path]); done("已永久删除");
+  });
+}
+$("trashBtn").addEventListener("click", openTrash);
 
 // 每次回到这个页面时更新天数
 document.addEventListener("visibilitychange", () => { if (!document.hidden && state.user) loadRecords(); });

@@ -1,5 +1,8 @@
-// 每天早上 9 点（马来西亚时间）自动检查，有快到期的就发 WhatsApp
+// 每天早上 9 点（马来西亚时间）自动执行：
+// 1) 清掉垃圾桶里超过 100 天的记录和文件
+// 2) 有快到期的就发 WhatsApp（有设定 CallMeBot 才会发）
 import { pickDue, buildMessages, todayInMY } from "../lib/reminder.mjs";
+import { planPurge } from "../lib/trash.mjs";
 
 const env = (k) => (process.env[k] || "").trim();
 
@@ -29,21 +32,49 @@ async function sendWhatsApp({ phone, apikey }, text) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+async function purgeTrash(SB_URL, H, records) {
+  const { deleteRecords, trimFiles } = planPurge(records);
+  const removeObjects = async (paths) => {
+    if (!paths.length) return;
+    await fetch(`${SB_URL}/storage/v1/object/documents`, { method: "DELETE", headers: H, body: JSON.stringify({ prefixes: paths }) });
+  };
+  for (const d of deleteRecords) {
+    const r = await fetch(`${SB_URL}/rest/v1/records?id=eq.${d.id}`, { method: "DELETE", headers: { ...H, Prefer: "return=minimal" } });
+    if (r.ok) await removeObjects(d.paths);
+  }
+  for (const t of trimFiles) {
+    const r = await fetch(`${SB_URL}/rest/v1/records?id=eq.${t.id}`, {
+      method: "PATCH", headers: { ...H, Prefer: "return=minimal" }, body: JSON.stringify({ trash_files: t.keep }),
+    });
+    if (r.ok) await removeObjects(t.paths);
+  }
+  if (deleteRecords.length || trimFiles.length) console.log(`垃圾桶：永久删除 ${deleteRecords.length} 项记录，清理 ${trimFiles.length} 项的旧文件`);
+}
+
 export default async () => {
   const SB_URL = env("SUPABASE_URL").replace(/\/$/, "");
   const SB_KEY = env("SUPABASE_SECRET_KEY");
-  const to = recipients();
-  if (!SB_URL || !SB_KEY || !to.length) {
-    console.error("缺少环境变量：SUPABASE_URL / SUPABASE_SECRET_KEY / CALLMEBOT_PHONE / CALLMEBOT_APIKEY");
+  if (!SB_URL || !SB_KEY) {
+    console.error("缺少环境变量：SUPABASE_URL / SUPABASE_SECRET_KEY");
     return new Response("missing env", { status: 500 });
   }
+  const H = sbHeaders(SB_KEY);
 
-  const res = await fetch(`${SB_URL}/rest/v1/records?archived=eq.false&select=id,category,title,holder,expiry_date,notified_stage,archived`, { headers: sbHeaders(SB_KEY) });
+  const res = await fetch(`${SB_URL}/rest/v1/records?select=*`, { headers: H });
   if (!res.ok) {
     console.error("读取 Supabase 失败", res.status, await res.text());
     return new Response("supabase error", { status: 500 });
   }
-  const records = await res.json();
+  const all = await res.json();
+
+  // 1) 垃圾桶
+  try { await purgeTrash(SB_URL, H, all); } catch (e) { console.error("清理垃圾桶失败：", e.message); }
+
+  // 2) WhatsApp 提醒
+  const to = recipients();
+  if (!to.length) { console.log("还没设定 WhatsApp（CALLMEBOT_PHONE / CALLMEBOT_APIKEY），跳过提醒"); return new Response("no whatsapp configured"); }
+
+  const records = all.filter((r) => !r.deleted_at && !r.archived);
   const today = todayInMY();
   const due = pickDue(records, today);
   console.log(`${today}: 共 ${records.length} 项，今天要提醒 ${due.length} 项`);
@@ -69,7 +100,7 @@ export default async () => {
   for (const r of due) {
     await fetch(`${SB_URL}/rest/v1/records?id=eq.${r.id}`, {
       method: "PATCH",
-      headers: { ...sbHeaders(SB_KEY), Prefer: "return=minimal" },
+      headers: { ...H, Prefer: "return=minimal" },
       body: JSON.stringify({ notified_stage: String(r.stage) }),
     });
   }

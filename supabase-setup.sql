@@ -38,6 +38,8 @@ create table if not exists public.records (
   history         jsonb not null default '[]'::jsonb,
   notified_stage  text,              -- 系统自用：上次发 WhatsApp 的阶段
   archived        boolean not null default false,
+  deleted_at      timestamptz,       -- 垃圾桶：删除时间（100 天后自动清掉）
+  trash_files     jsonb not null default '[]'::jsonb,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
@@ -75,3 +77,7 @@ create policy "admin can delete files" on storage.objects for delete to authenti
 -- 4) 把你自己设为管理员 ↓↓↓ 换成你的 email
 insert into public.app_admins (email) values ('YOUR_EMAIL@eternalgy.my')
 on conflict do nothing;
+
+-- 5) 垃圾桶（旧项目补加用，重复跑没关系）
+alter table public.records add column if not exists deleted_at timestamptz;
+alter table public.records add column if not exists trash_files jsonb not null default '[]'::jsonb;
