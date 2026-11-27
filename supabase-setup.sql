@@ -32,7 +32,7 @@ create table if not exists public.records (
   holder          text,              -- 车牌 / 持有人
   ref_no          text,              -- 保单号 / 证件号码
   issue_date      date,
-  expiry_date     date not null,
+  expiry_date     date,              -- 车卡等可以没有到期日
   notes           text,
   files           jsonb not null default '[]'::jsonb,
   history         jsonb not null default '[]'::jsonb,
@@ -40,6 +40,7 @@ create table if not exists public.records (
   archived        boolean not null default false,
   deleted_at      timestamptz,       -- 垃圾桶：删除时间（100 天后自动清掉）
   trash_files     jsonb not null default '[]'::jsonb,
+  extra           jsonb not null default '{}'::jsonb,  -- 罚款 / 贷款等类别的额外栏位
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
@@ -81,3 +82,7 @@ on conflict do nothing;
 -- 5) 垃圾桶（旧项目补加用，重复跑没关系）
 alter table public.records add column if not exists deleted_at timestamptz;
 alter table public.records add column if not exists trash_files jsonb not null default '[]'::jsonb;
+
+-- 6) 车卡不用到期日 + 罚款 / 贷款的额外栏位（重复跑没关系）
+alter table public.records alter column expiry_date drop not null;
+alter table public.records add column if not exists extra jsonb not null default '{}'::jsonb;

@@ -74,7 +74,7 @@ export default async () => {
   const to = recipients();
   if (!to.length) { console.log("还没设定 WhatsApp（CALLMEBOT_PHONE / CALLMEBOT_APIKEY），跳过提醒"); return new Response("no whatsapp configured"); }
 
-  const records = all.filter((r) => !r.deleted_at && !r.archived);
+  const records = all.filter((r) => !r.deleted_at && !r.archived && r.expiry_date && !(r.extra && r.extra.resolved_date)); // 已删除 / 停用 / 没到期日 / 罚款已解决 → 不提醒
   const today = todayInMY();
   const due = pickDue(records, today);
   console.log(`${today}: 共 ${records.length} 项，今天要提醒 ${due.length} 项`);

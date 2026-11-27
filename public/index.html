@@ -40,6 +40,7 @@
   .chip.active{background:var(--brand);color:#fff;border-color:var(--brand)}
   .list{display:flex;flex-direction:column;gap:8px}
   .item{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--green);border-radius:var(--radius);padding:12px 14px;display:flex;gap:12px;align-items:center;cursor:pointer}
+  .item.s-none,.item.s-resolved{border-left-color:#aaa}
   .item.s-expired{border-left-color:var(--red)} .item.s-soon{border-left-color:var(--orange)} .item.s-archived{border-left-color:#aaa;opacity:.7}
   .item .main{flex:1;min-width:0}
   .item .t{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -159,9 +160,54 @@ import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { staffEmail, staffPassword, STAFF_DOMAIN } from "./staff-id.mjs";
 
 const CATEGORIES = ["车险 Insurance", "Road Tax", "Puspakom", "车卡 Grant", "罚款记录 Saman", "银行贷款文件 Loan", "证书 Certification", "执照 Licence", "其他 Others"];
-// 每个类别的「号码」栏位名称；null = 这个类别不需要号码栏
-const REF_LABELS = { "Road Tax": null, "Puspakom": "Serial No" };
-const refLabel = (cat) => (cat in REF_LABELS ? REF_LABELS[cat] : "保单 / 证件号码");
+// 每个类别的栏位设定（没写的就用默认）
+//   ref: 号码栏名称（null = 不要这一栏）  issue/expiry/holder: 栏位名称
+//   noExpiry: 不用到期日  renew: 有没有「续期」  resolvedKey: 填了这一栏就算已解决  extra: 这个类别额外的栏位
+const CAT_CFG = {
+  "Road Tax": { ref: null },
+  "Puspakom": { ref: "Serial No" },
+  "车卡 Grant": { ref: "车卡号码", issue: "注册日期", noExpiry: true, renew: false },
+  "罚款记录 Saman": {
+    ref: "罚单号码", issue: "罚款日期", expiry: "缴款期限", holder: "车牌", renew: false, resolvedKey: "resolved_date",
+    extra: [
+      { k: "resolved_date", label: "解决日期", type: "date", hint: "填了就算「已解决」，不会再提醒" },
+      { k: "staff", label: "罚款员工名字" },
+      { k: "reason", label: "罚款原因", type: "textarea" },
+    ],
+  },
+  "银行贷款文件 Loan": {
+    ref: null, issue: "Letter Offer 日期", expiry: "满期日期", holder: "车牌 / 资产", renew: false,
+    extra: [
+      { k: "bank", label: "银行" },
+      { k: "loan_amount", label: "贷款金额 (RM)", type: "money" },
+      { k: "approved_amount", label: "批准金额 (RM)", type: "money" },
+      { k: "rate", label: "Rate (%)", type: "rate" },
+      { k: "installment", label: "每月分期 (RM)", type: "money" },
+      { k: "tenure", label: "分期几个月", type: "months" },
+    ],
+  },
+};
+const cc = (cat) => ({ ref: "保单 / 证件号码", issue: "发出 / 开始日", expiry: "到期日", holder: "车牌 / 持有人", renew: true, noExpiry: false, resolvedKey: null, extra: [], ...(CAT_CFG[cat] || {}) });
+const refLabel = (cat) => cc(cat).ref;
+function fmtExtra(f, v) {
+  if (v === null || v === undefined || v === "") return "—";
+  if (f.type === "money") return "RM " + Number(v).toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (f.type === "rate") return v + "%";
+  if (f.type === "months") return v + " 个月";
+  if (f.type === "date") return fmtDate(v);
+  return v;
+}
+function extraInput(f, v) {
+  const val = esc(v ?? "");
+  const common = `class="inp" data-x="${f.k}"`;
+  let inp;
+  if (f.type === "textarea") inp = `<textarea ${common}>${val}</textarea>`;
+  else if (f.type === "date") inp = `<input ${common} type="date" value="${val}">`;
+  else if (f.type === "money" || f.type === "rate") inp = `<input ${common} type="number" step="0.01" min="0" inputmode="decimal" value="${val}">`;
+  else if (f.type === "months") inp = `<input ${common} type="number" step="1" min="0" inputmode="numeric" value="${val}">`;
+  else inp = `<input ${common} value="${val}">`;
+  return `<div ${f.type === "textarea" ? 'style="grid-column:1/-1"' : ""}><label>${esc(f.label)}</label>${inp}${f.hint ? `<div class="hint">${esc(f.hint)}</div>` : ""}</div>`;
+}
 const SOON_DAYS = 30;
 const TRASH_DAYS = 100; // 垃圾桶保留天数（每天自动检查时清掉过期的）
 const BUCKET = "documents";
@@ -196,6 +242,9 @@ function fmtDate(s) {
 }
 function status(r) {
   if (r.archived) return "archived";
+  const rk = cc(r.category).resolvedKey;
+  if (rk && r.extra && r.extra[rk]) return "resolved";
+  if (!r.expiry_date) return "none";
   const d = daysLeft(r.expiry_date);
   if (d < 0) return "expired";
   if (d <= SOON_DAYS) return "soon";
@@ -203,6 +252,9 @@ function status(r) {
 }
 function daysText(r) {
   if (r.archived) return "已停用";
+  const s = status(r);
+  if (s === "resolved") return "已解决";
+  if (s === "none") return "无到期日";
   const d = daysLeft(r.expiry_date);
   if (d < 0) return `过期 ${-d} 天`;
   if (d === 0) return "今天到期";
@@ -316,10 +368,11 @@ function render() {
     if (r.archived && !state.showArchived) return false;
     if (state.filter !== "all" && status(r) !== state.filter) return false;
     if (state.cat !== "全部" && r.category !== state.cat) return false;
-    if (q && ![r.title, r.holder, r.ref_no, r.category, r.notes].some(v => (v||"").toLowerCase().includes(q))) return false;
+    if (q && ![r.title, r.holder, r.ref_no, r.category, r.notes, ...Object.values(r.extra || {})].some(v => String(v ?? "").toLowerCase().includes(q))) return false;
     return true;
   });
-  rows.sort((a,b) => (a.archived - b.archived) || a.expiry_date.localeCompare(b.expiry_date));
+  const sortKey = (r) => ["resolved", "none"].includes(status(r)) ? "9999-12-31" : r.expiry_date;
+  rows.sort((a,b) => (a.archived - b.archived) || sortKey(a).localeCompare(sortKey(b)));
 
   if (!rows.length) {
     $("list").innerHTML = `<div class="empty">${state.records.length ? "没有符合的记录" : (state.isAdmin ? "还没有记录，按上面的「＋ 新增」开始" : "还没有记录")}</div>`;
@@ -328,11 +381,11 @@ function render() {
   $("list").innerHTML = rows.map(r => {
     const s = status(r);
     const nFiles = (r.files || []).length;
-    const pillCls = s === "expired" ? "expired" : s === "soon" ? "soon" : s === "archived" ? "archived" : "ok";
+    const pillCls = s === "expired" ? "expired" : s === "soon" ? "soon" : s === "ok" ? "ok" : "archived";
     return `<div class="item s-${s}" data-id="${r.id}">
       <div class="main">
         <div class="t">${esc(r.title)}</div>
-        <div class="sub"><span class="tag">${esc(r.category)}</span>${esc(r.holder || "")}${nFiles ? ` · 📎${nFiles}` : ""}</div>
+        <div class="sub"><span class="tag">${esc(r.category)}</span>${esc([r.holder, r.extra?.staff, r.extra?.bank].filter(Boolean).join(" · "))}${nFiles ? ` · 📎${nFiles}` : ""}</div>
       </div>
       <div class="days"><div class="d"><span class="pill ${pillCls}">${daysText(r)}</span></div><div class="date">${fmtDate(r.expiry_date)}</div></div>
     </div>`;
@@ -405,17 +458,19 @@ function wireOpenButtons(root) {
 
 // ---------- 详情 ----------
 function openDetail(r) {
+  const c = cc(r.category);
   const s = status(r);
-  const pillCls = s === "expired" ? "expired" : s === "soon" ? "soon" : s === "archived" ? "archived" : "ok";
+  const pillCls = s === "expired" ? "expired" : s === "soon" ? "soon" : s === "ok" ? "ok" : "archived";
   const hist = (r.history || []).slice().reverse();
   const ov = openModal(`
     <div class="head"><div><span class="tag">${esc(r.category)}</span><h3>${esc(r.title)}</h3></div><button class="x" data-close>✕</button></div>
     <div><span class="pill ${pillCls}">${daysText(r)}</span></div>
     <dl class="kv">
-      <dt>到期日</dt><dd><b>${fmtDate(r.expiry_date)}</b></dd>
-      <dt>发出 / 开始日</dt><dd>${fmtDate(r.issue_date)}</dd>
-      <dt>车牌 / 持有人</dt><dd>${esc(r.holder || "—")}</dd>
-      ${refLabel(r.category) || r.ref_no ? `<dt>${esc(refLabel(r.category) || "号码")}</dt><dd>${esc(r.ref_no || "—")}</dd>` : ""}
+      ${!c.noExpiry || r.expiry_date ? `<dt>${esc(c.expiry)}</dt><dd><b>${fmtDate(r.expiry_date)}</b></dd>` : ""}
+      <dt>${esc(c.issue)}</dt><dd>${fmtDate(r.issue_date)}</dd>
+      <dt>${esc(c.holder)}</dt><dd>${esc(r.holder || "—")}</dd>
+      ${c.ref || r.ref_no ? `<dt>${esc(c.ref || "号码")}</dt><dd>${esc(r.ref_no || "—")}</dd>` : ""}
+      ${c.extra.map(f => `<dt>${esc(f.label.replace(/\s*\((RM|%)\)/, ""))}</dt><dd style="white-space:pre-wrap">${esc(fmtExtra(f, r.extra?.[f.k]))}</dd>`).join("")}
       <dt>备注</dt><dd style="white-space:pre-wrap">${esc(r.notes || "—")}</dd>
     </dl>
     <div class="section-t">文件</div>
@@ -424,7 +479,7 @@ function openDetail(r) {
       <div class="hist"><div>旧到期日 <b>${fmtDate(h.expiry_date)}</b>${h.ref_no ? ` · ${esc(h.ref_no)}` : ""} <span class="hint">（${(h.renewed_at||"").slice(0,10)} 续期）</span></div>
       ${(h.files||[]).length ? filesHtml(h.files) : ""}</div>`).join("")}` : ""}
     ${state.isAdmin ? `<div class="actions">
-      <button class="btn primary" id="dRenew">🔄 续期</button>
+      ${c.renew ? `<button class="btn primary" id="dRenew">🔄 续期</button>` : ""}
       <button class="btn" id="dEdit">✏️ 编辑</button>
       <button class="btn" id="dArchive">${r.archived ? "♻️ 恢复" : "⏸ 停用"}</button>
       <button class="btn danger" id="dDel">🗑 删除</button>
@@ -433,7 +488,7 @@ function openDetail(r) {
   `);
   wireOpenButtons(ov);
   if (!state.isAdmin) return;
-  ov.querySelector("#dRenew").onclick = () => openRenew(r);
+  if (c.renew) ov.querySelector("#dRenew").onclick = () => openRenew(r);
   ov.querySelector("#dEdit").onclick = () => openForm(r);
   ov.querySelector("#dArchive").onclick = async () => {
     const { error } = await sb.from("records").update({ archived: !r.archived, updated_at: new Date().toISOString() }).eq("id", r.id);
@@ -461,11 +516,12 @@ function openForm(r) {
       <label>名称 *</label>
       <input class="inp" name="title" required placeholder="例：Hilux 车险 / CIDB 证书 / 电工执照" value="${esc(r?.title)}">
       <div class="grid2">
-        <div><label>车牌 / 持有人</label><input class="inp" name="holder" placeholder="例：VKA 1234 / 陈大明" value="${esc(r?.holder)}"></div>
+        <div><label id="holderLbl">车牌 / 持有人</label><input class="inp" name="holder" placeholder="例：VKA 1234 / 陈大明" value="${esc(r?.holder)}"></div>
         <div id="refBox"><label id="refLbl">保单 / 证件号码</label><input class="inp" name="ref_no" value="${esc(r?.ref_no)}"></div>
-        <div><label>发出 / 开始日</label><input class="inp" type="date" name="issue_date" value="${esc(r?.issue_date || "")}"></div>
-        <div><label>到期日 *</label><input class="inp" type="date" name="expiry_date" required value="${esc(r?.expiry_date || "")}"></div>
+        <div><label id="issueLbl">发出 / 开始日</label><input class="inp" type="date" name="issue_date" value="${esc(r?.issue_date || "")}"></div>
+        <div id="expBox"><label id="expLbl">到期日 *</label><input class="inp" type="date" name="expiry_date" value="${esc(r?.expiry_date || "")}"></div>
       </div>
+      <div class="grid2" id="extraBox"></div>
       <label>备注</label>
       <textarea class="inp" name="notes" placeholder="例：保险公司、代理电话、续期要准备的东西">${esc(r?.notes)}</textarea>
       <label>文件</label>
@@ -484,14 +540,23 @@ function openForm(r) {
     });
   };
   drawKept();
-  // 按类别切换「号码」栏：Road Tax 不显示，Puspakom 显示 Serial No
+  // 按类别切换栏位（号码、日期名称、额外栏位）
   const catSel = ov.querySelector("select[name=category]");
-  const syncRef = () => {
-    const lbl = refLabel(catSel.value);
-    ov.querySelector("#refBox").classList.toggle("hidden", !lbl);
-    if (lbl) ov.querySelector("#refLbl").textContent = lbl;
+  const extraVals = { ...(r?.extra || {}) };
+  const syncCat = () => {
+    const c = cc(catSel.value);
+    ov.querySelector("#refBox").classList.toggle("hidden", !c.ref);
+    if (c.ref) ov.querySelector("#refLbl").textContent = c.ref;
+    ov.querySelector("#holderLbl").textContent = c.holder;
+    ov.querySelector("#issueLbl").textContent = c.issue;
+    ov.querySelector("#expBox").classList.toggle("hidden", c.noExpiry);
+    ov.querySelector("#expLbl").textContent = c.expiry + " *";
+    ov.querySelector("input[name=expiry_date]").required = !c.noExpiry;
+    const box = ov.querySelector("#extraBox");
+    box.innerHTML = c.extra.map(f => extraInput(f, extraVals[f.k])).join("");
+    box.querySelectorAll("[data-x]").forEach(el => el.addEventListener("input", () => { extraVals[el.dataset.x] = el.value; }));
   };
-  catSel.addEventListener("change", syncRef); syncRef();
+  catSel.addEventListener("change", syncCat); syncCat();
   ov.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", closeModal));
   ov.querySelector("#f").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -506,7 +571,13 @@ function openForm(r) {
         holder: fd.get("holder").trim() || null,
         ref_no: refLabel(fd.get("category")) ? (fd.get("ref_no").trim() || null) : (r?.ref_no || null),
         issue_date: fd.get("issue_date") || null,
-        expiry_date: fd.get("expiry_date"),
+        expiry_date: cc(fd.get("category")).noExpiry ? null : fd.get("expiry_date"),
+        extra: Object.fromEntries(cc(fd.get("category")).extra.map(f => {
+          let v = String(extraVals[f.k] ?? "").trim();
+          if (!v) return [f.k, null];
+          if (["money", "rate", "months"].includes(f.type)) v = Number(v);
+          return [f.k, v];
+        })),
         notes: fd.get("notes").trim() || null,
         files: [...keptFiles, ...newFiles],
         updated_at: new Date().toISOString(),
