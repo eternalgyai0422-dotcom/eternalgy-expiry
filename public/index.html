@@ -158,7 +158,10 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 import { staffEmail, staffPassword, STAFF_DOMAIN } from "./staff-id.mjs";
 
-const CATEGORIES = ["车险 Insurance", "Road Tax", "Puspakom", "证书 Certification", "执照 Licence", "其他 Others"];
+const CATEGORIES = ["车险 Insurance", "Road Tax", "Puspakom", "车卡 Grant", "罚款记录 Saman", "银行贷款文件 Loan", "证书 Certification", "执照 Licence", "其他 Others"];
+// 每个类别的「号码」栏位名称；null = 这个类别不需要号码栏
+const REF_LABELS = { "Road Tax": null, "Puspakom": "Serial No" };
+const refLabel = (cat) => (cat in REF_LABELS ? REF_LABELS[cat] : "保单 / 证件号码");
 const SOON_DAYS = 30;
 const TRASH_DAYS = 100; // 垃圾桶保留天数（每天自动检查时清掉过期的）
 const BUCKET = "documents";
@@ -412,7 +415,7 @@ function openDetail(r) {
       <dt>到期日</dt><dd><b>${fmtDate(r.expiry_date)}</b></dd>
       <dt>发出 / 开始日</dt><dd>${fmtDate(r.issue_date)}</dd>
       <dt>车牌 / 持有人</dt><dd>${esc(r.holder || "—")}</dd>
-      <dt>号码</dt><dd>${esc(r.ref_no || "—")}</dd>
+      ${refLabel(r.category) || r.ref_no ? `<dt>${esc(refLabel(r.category) || "号码")}</dt><dd>${esc(r.ref_no || "—")}</dd>` : ""}
       <dt>备注</dt><dd style="white-space:pre-wrap">${esc(r.notes || "—")}</dd>
     </dl>
     <div class="section-t">文件</div>
@@ -459,7 +462,7 @@ function openForm(r) {
       <input class="inp" name="title" required placeholder="例：Hilux 车险 / CIDB 证书 / 电工执照" value="${esc(r?.title)}">
       <div class="grid2">
         <div><label>车牌 / 持有人</label><input class="inp" name="holder" placeholder="例：VKA 1234 / 陈大明" value="${esc(r?.holder)}"></div>
-        <div><label>保单 / 证件号码</label><input class="inp" name="ref_no" value="${esc(r?.ref_no)}"></div>
+        <div id="refBox"><label id="refLbl">保单 / 证件号码</label><input class="inp" name="ref_no" value="${esc(r?.ref_no)}"></div>
         <div><label>发出 / 开始日</label><input class="inp" type="date" name="issue_date" value="${esc(r?.issue_date || "")}"></div>
         <div><label>到期日 *</label><input class="inp" type="date" name="expiry_date" required value="${esc(r?.expiry_date || "")}"></div>
       </div>
@@ -481,6 +484,14 @@ function openForm(r) {
     });
   };
   drawKept();
+  // 按类别切换「号码」栏：Road Tax 不显示，Puspakom 显示 Serial No
+  const catSel = ov.querySelector("select[name=category]");
+  const syncRef = () => {
+    const lbl = refLabel(catSel.value);
+    ov.querySelector("#refBox").classList.toggle("hidden", !lbl);
+    if (lbl) ov.querySelector("#refLbl").textContent = lbl;
+  };
+  catSel.addEventListener("change", syncRef); syncRef();
   ov.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", closeModal));
   ov.querySelector("#f").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -493,7 +504,7 @@ function openForm(r) {
         category: fd.get("category"),
         title: fd.get("title").trim(),
         holder: fd.get("holder").trim() || null,
-        ref_no: fd.get("ref_no").trim() || null,
+        ref_no: refLabel(fd.get("category")) ? (fd.get("ref_no").trim() || null) : (r?.ref_no || null),
         issue_date: fd.get("issue_date") || null,
         expiry_date: fd.get("expiry_date"),
         notes: fd.get("notes").trim() || null,
@@ -528,8 +539,8 @@ function openRenew(r) {
         <div><label>新的开始日</label><input class="inp" type="date" name="issue_date" value="${esc(r.expiry_date)}"></div>
         <div><label>新的到期日 *</label><input class="inp" type="date" name="expiry_date" required></div>
       </div>
-      <label>新的保单 / 证件号码（不变可以留空）</label>
-      <input class="inp" name="ref_no" placeholder="${esc(r.ref_no || "")}">
+      ${refLabel(r.category) ? `<label>新的 ${esc(refLabel(r.category))}（不变可以留空）</label>
+      <input class="inp" name="ref_no" placeholder="${esc(r.ref_no || "")}">` : ""}
       <label>上传新的文件</label>
       <input class="inp" type="file" name="newfiles" multiple accept=".pdf,image/*,.doc,.docx,.xls,.xlsx">
       <div class="err" id="rErr"></div>
